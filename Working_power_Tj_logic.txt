@@ -1,0 +1,1013 @@
+ function [total_server_power, max_power] = server_overhead(server_overhead, num_cpu, num_gpu, processor_load, processor_conf, proj_cpu_T, proj_gpu_T)
+% This is a temporary DEBUGGING function.
+% It prints all inputs to the console to check their values.
+
+fprintf('\n\n--- START DEBUG PRINT ---\n');
+
+% --- Print Simple Inputs ---
+fprintf('== 1. SCALAR INPUTS ==\n');
+fprintf('  server_overhead: %f\n', server_overhead);
+fprintf('  num_cpu:         %f\n', num_cpu);
+fprintf('  num_gpu:         %f\n', num_gpu);
+fprintf('  proj_cpu_T:      %f C\n', proj_cpu_T);
+fprintf('  proj_gpu_T:      %f C\n', proj_gpu_T);
+
+fprintf('\n');
+
+% --- Print CPU Config Struct ---
+fprintf('== 2. PROCESSOR_CONF (CPU) ==\n');
+if num_cpu > 0
+    fprintf('  HD_cores:        %f\n', processor_conf.cpu_conf.HD_cores);
+    fprintf('  TDP:             %f W\n', processor_conf.cpu_conf.TDP);
+    fprintf('  ACT_pwr_split:   %f\n', processor_conf.cpu_conf.ACT_pwr_split);
+    fprintf('  TDP_Tj (T_base): %f C\n', processor_conf.cpu_conf.TDP_Tj);
+    fprintf('  Tj_max (T_max):  %f C\n', processor_conf.cpu_conf.Tj_max);
+    fprintf('  Switching_cap:   %e\n', processor_conf.cpu_conf.Switching_cap); % Use %e for scientific notation
+    fprintf('  V_cpu:           %f V\n', processor_conf.cpu_conf.V_cpu);
+    fprintf('  Max_freq:        %e Hz\n', processor_conf.cpu_conf.Max_freq); % Use %e
+    fprintf('  TDP_high_load:   %f\n', processor_conf.cpu_conf.TDP_high_load);
+else
+    fprintf('  (No CPUs, skipping print)\n');
+end
+
+fprintf('\n');
+
+% --- Print CPU Load Struct ---
+fprintf('== 3. PROCESSOR_LOAD (CPU) ==\n');
+if num_cpu > 0
+    fprintf('  init_uti:    %f\n', processor_load.cpu_load.init_uti);
+    fprintf('  init_core:   %f\n', processor_load.cpu_load.init_core);
+    fprintf('  comp_uti:    %f\n', processor_load.cpu_load.comp_uti);
+    fprintf('  comp_core:   %f\n', processor_load.cpu_load.comp_core);
+    fprintf('  result_uti:  %f\n', processor_load.cpu_load.result_uti);
+    fprintf('  result_core: %f\n', processor_load.cpu_load.result_core);
+else
+    fprintf('  (No CPUs, skipping print)\n');
+end
+
+fprintf('\n');
+
+% --- Print GPU Config Struct ---
+fprintf('== 4. PROCESSOR_CONF (GPU) ==\n');
+if num_gpu > 0
+    fprintf('  HD_cores:        %f\n', processor_conf.gpu_conf.HD_cores);
+    fprintf('  TDP:             %f W\n', processor_conf.gpu_conf.TDP);
+    fprintf('  ACT_pwr_split:   %f\n', processor_conf.gpu_conf.ACT_pwr_split);
+    fprintf('  TDP_Tj (T_base): %f C\n', processor_conf.gpu_conf.TDP_Tj);
+    fprintf('  Tj_max (T_max):  %f C\n', processor_conf.gpu_conf.Tj_max);
+    fprintf('  Switching_cap:   %e\n', processor_conf.gpu_conf.Switching_cap); % Use %e
+    fprintf('  V_gpu:           %f V\n', processor_conf.gpu_conf.V_gpu);
+    fprintf('  Max_freq:        %e Hz\n', processor_conf.gpu_conf.Max_freq); % Use %e
+    fprintf('  TDP_high_load:   %f\n', processor_conf.gpu_conf.TDP_high_load);
+else
+    fprintf('  (No GPUs, skipping print)\n');
+end
+
+fprintf('\n');
+
+% --- Print GPU Load Struct ---
+fprintf('== 5. PROCESSOR_LOAD (GPU) ==\n');
+if num_gpu > 0
+    fprintf('  init_uti:    %f\n', processor_load.gpu_load.init_uti);
+    fprintf('  init_core:   %f\n', processor_load.gpu_load.init_core);
+    fprintf('  comp_uti:    %f\n', processor_load.gpu_load.comp_uti);
+    fprintf('  comp_core:   %f\n', processor_load.gpu_load.comp_core);
+    fprintf('  result_uti:  %f\n', processor_load.gpu_load.result_uti);
+    fprintf('  result_core: %f\n', processor_load.gpu_load.result_core);
+else
+    fprintf('  (No GPUs, skipping print)\n');
+end
+fprintf('---  END DEBUG PRINT  ---\n\n');
+
+
+% fprintf('\n\n--- START PART 2: CPU ACTIVE POWER DEBUG ---\n');
+% % --- 0. Initialize Outputs for this section ---
+% P_active_init_cpu = 0;
+% P_active_main_cpu = 0;
+% P_active_result_cpu = 0;
+% if num_cpu > 0
+%     % --- 1. Get Specs from Structs ---
+%     cpu_spec_cap = processor_conf.cpu_conf.Switching_cap;
+%     cpu_voltage = processor_conf.cpu_conf.V_cpu;
+% 
+%     % --- *** CORRECTION HERE *** ---
+%     % Read the input frequency (assuming it's in GHz)
+%     cpu_freq_ghz = processor_conf.cpu_conf.Max_freq; 
+%     % Convert to Hz for the power formula
+%     cpu_freq_hz = cpu_freq_ghz * 1e-9; 
+%     % --- *** END CORRECTION *** ---
+% 
+%     cpu_load_tdp = processor_conf.cpu_conf.TDP_high_load;
+%     single_cpu_cores = processor_conf.cpu_conf.HD_cores; % This is MaxCores
+%     total_cpu_cores = num_cpu * single_cpu_cores;
+% 
+%     % Check for division by zero issues
+%     if single_cpu_cores == 0 || cpu_load_tdp == 0 || cpu_freq_hz == 0
+%          fprintf('  ERROR: single_cpu_cores, cpu_load_tdp, or converted cpu_freq_hz is 0.\n');
+%          fprintf('  single_cpu_cores: %f, cpu_load_tdp: %f, cpu_freq_hz: %e\n', single_cpu_cores, cpu_load_tdp, cpu_freq_hz);
+%     else
+%         % --- 2. Print Constant Multiplier ---
+%         fprintf('== 2.1. CONSTANT MULTIPLIER (CPU) ==\n');
+%         fprintf('  Input Freq (assumed GHz):  %f GHz\n', cpu_freq_ghz);
+%         fprintf('  Converted Freq (Hz):       %e Hz\n', cpu_freq_hz);
+%         fprintf('  Voltage (V_cpu):           %f V\n', cpu_voltage);
+%         fprintf('  V^2 * F term (using Hz):   %e\n', (cpu_voltage^2) * cpu_freq_hz);
+%         fprintf('\n');
+%         % --- 3. Phase 1: Init ---
+%         fprintf('== 2.2. INIT PHASE (CPU) ==\n');
+%         Load_phase_init_cpu = processor_load.cpu_load.init_uti;
+%         num_active_cores_init_cpu = min(total_cpu_cores, processor_load.cpu_load.init_core);
+%         active_cores_per_chip_init_cpu = num_active_cores_init_cpu / num_cpu; 
+%         fprintf('  Load (init_uti):            %f\n', Load_phase_init_cpu);
+%         fprintf('  Active Cores (total):       %f\n', num_active_cores_init_cpu);
+%         fprintf('  Active Cores (per chip):    %f\n', active_cores_per_chip_init_cpu);
+%         % Formula Part 1:
+%         Switching_cap_1_chip_init_cpu = cpu_spec_cap * (Load_phase_init_cpu / cpu_load_tdp) * (active_cores_per_chip_init_cpu / single_cpu_cores);
+%         fprintf('  Intermediate SwitchingCap (1 chip): %e\n', Switching_cap_1_chip_init_cpu);
+%         % Formula Part 2 (uses cpu_freq_hz):
+%         P_active_1_chip_init_cpu = Switching_cap_1_chip_init_cpu * (cpu_voltage^2) * cpu_freq_hz;
+%         fprintf('  P_active (1 chip): %f W\n', P_active_1_chip_init_cpu);
+%         P_active_init_cpu = num_cpu * P_active_1_chip_init_cpu;
+%         fprintf('  FINAL P_active_init (ALL %f chips): %f W\n', num_cpu, P_active_init_cpu);
+%         fprintf('\n');
+%         % --- 4. Phase 2: Main (Comp) ---
+%         fprintf('== 2.3. MAIN PHASE (CPU) ==\n');
+%         Load_phase_main_cpu = processor_load.cpu_load.comp_uti;
+%         num_active_cores_main_cpu = min(total_cpu_cores, processor_load.cpu_load.comp_core);
+%         active_cores_per_chip_main_cpu = num_active_cores_main_cpu / num_cpu;
+%         fprintf('  Load (comp_uti):            %f\n', Load_phase_main_cpu);
+%         fprintf('  Active Cores (total):       %f\n', num_active_cores_main_cpu);
+%         fprintf('  Active Cores (per chip):    %f\n', active_cores_per_chip_main_cpu);
+%         % Formula Part 1:
+%         Switching_cap_1_chip_main_cpu = cpu_spec_cap * (Load_phase_main_cpu / cpu_load_tdp) * (active_cores_per_chip_main_cpu / single_cpu_cores);
+%         fprintf('  Intermediate SwitchingCap (1 chip): %e\n', Switching_cap_1_chip_main_cpu);
+%         % Formula Part 2 (uses cpu_freq_hz):
+%         P_active_1_chip_main_cpu = Switching_cap_1_chip_main_cpu * (cpu_voltage^2) * cpu_freq_hz;
+%         fprintf('  P_active (1 chip): %f W\n', P_active_1_chip_main_cpu);
+%         P_active_main_cpu = num_cpu * P_active_1_chip_main_cpu;
+%         fprintf('  FINAL P_active_main (ALL %f chips): %f W\n', num_cpu, P_active_main_cpu);
+%         fprintf('\n');
+%         % --- 5. Phase 3: Result ---
+%         fprintf('== 2.4. RESULT PHASE (CPU) ==\n');
+%         Load_phase_result_cpu = processor_load.cpu_load.result_uti;
+%         num_active_cores_result_cpu = min(total_cpu_cores, processor_load.cpu_load.result_core);
+%         active_cores_per_chip_result_cpu = num_active_cores_result_cpu / num_cpu;
+%         fprintf('  Load (result_uti):          %f\n', Load_phase_result_cpu);
+%         fprintf('  Active Cores (total):       %f\n', num_active_cores_result_cpu);
+%         fprintf('  Active Cores (per chip):    %f\n', active_cores_per_chip_result_cpu);
+%         % Formula Part 1:
+%         Switching_cap_1_chip_result_cpu = cpu_spec_cap * (Load_phase_result_cpu / cpu_load_tdp) * (active_cores_per_chip_result_cpu / single_cpu_cores);
+%         fprintf('  Intermediate SwitchingCap (1 chip): %e\n', Switching_cap_1_chip_result_cpu);
+%         % Formula Part 2 (uses cpu_freq_hz):
+%         P_active_1_chip_result_cpu = Switching_cap_1_chip_result_cpu * (cpu_voltage^2) * cpu_freq_hz;
+%         fprintf('  P_active (1 chip): %f W\n', P_active_1_chip_result_cpu);
+%         P_active_result_cpu = num_cpu * P_active_1_chip_result_cpu;
+%         fprintf('  FINAL P_active_result (ALL %f chips): %f W\n', num_cpu, P_active_result_cpu);
+%         fprintf('\n');
+%     end
+% else
+%     fprintf('  num_cpu is %f. No CPUs, so Active Power is 0.\n', num_cpu);
+% end
+% fprintf('--- END PART 2: CPU ACTIVE POWER DEBUG ---\n\n');
+
+% --- PASTE THIS NEW CODE BLOCK (PART 2, v9) ---
+
+% --- PASTE THIS NEW CODE BLOCK (PART 2, v11) ---
+
+fprintf('\n\n--- START PART 2: CPU ACTIVE POWER DEBUG ---\n');
+
+% --- 0. Initialize Outputs for this section ---
+P_active_init_cpu = 0;
+P_active_main_cpu = 0;
+P_active_result_cpu = 0;
+
+if num_cpu > 0
+    % --- 1. Get Specs from Structs ---
+    cpu_spec_cap = processor_conf.cpu_conf.Switching_cap;
+    cpu_voltage = processor_conf.cpu_conf.V_cpu;
+
+    % --- CORRECTED: Read F_cpu from struct and convert ---
+    cpu_freq_hz = processor_conf.cpu_conf.F_cpu; % Read from struct
+    cpu_freq_ghz = cpu_freq_hz * 1e-9;             % Convert GHz to Hz
+    % --- END ---
+
+    cpu_load_tdp = processor_conf.cpu_conf.TDP_high_load;
+    single_cpu_cores = processor_conf.cpu_conf.HD_cores; % MaxCores for 1 chip
+    total_cpu_cores = num_cpu * single_cpu_cores;
+
+    % Check for division by zero issues
+    if single_cpu_cores == 0 || cpu_load_tdp == 0 || cpu_freq_hz == 0
+         fprintf('  ERROR: single_cpu_cores, cpu_load_tdp, or F_cpu is 0.\n');
+         fprintf('  single_cpu_cores: %f, cpu_load_tdp: %f, F_cpu (input): %f\n', single_cpu_cores, cpu_load_tdp, cpu_freq_ghz);
+    else
+        % --- 2. Print Constant Multiplier ---
+        fprintf('== 2.1. CONSTANT MULTIPLIER (CPU) ==\n');
+        fprintf('  Input Freq (F_cpu):        %f Hz\n', cpu_freq_hz);
+        fprintf('  Converted Freq (GHz):       %e GHz\n', cpu_freq_ghz);
+        fprintf('  Voltage (V_cpu):           %f V\n', cpu_voltage);
+        fprintf('  V^2 * F term:              %e\n', (cpu_voltage^2) * cpu_freq_hz);
+        fprintf('\n');
+
+        % Calculate C intermidiate
+        cap_inter_cpu = cpu_spec_cap * (cpu_voltage^2) * cpu_freq_ghz;
+
+
+        fprintf('\n');
+        fprintf(' Intermidiate gpu cap %e\n', cap_inter_cpu);
+        fprintf('\n');
+
+        % --- 3. Phase 1: Init ---
+        fprintf('== 2.2. INIT PHASE (CPU) ==\n');
+        Load_phase_init_cpu = processor_load.cpu_load.init_uti;
+        num_active_cores_init_cpu = min(total_cpu_cores, processor_load.cpu_load.init_core); % Total active cores
+        fprintf('  Load (init_uti):            %f\n', Load_phase_init_cpu);
+        fprintf('  Total Active Cores:         %f\n', num_active_cores_init_cpu);
+
+        chip_equivalent_load = num_active_cores_init_cpu / single_cpu_cores;
+        fprintf('  Chip Equivalent Load (TotalActive / CoresPerChip): %f\n', chip_equivalent_load);
+
+         P_active_init_cpu = cap_inter_cpu * (Load_phase_init_cpu / cpu_load_tdp) * chip_equivalent_load;
+        fprintf('  FINAL P_active_init (ALL chips): %f W\n', P_active_init_cpu);
+        fprintf('\n');
+
+        % --- 4. Phase 2: Main (Comp) ---
+        fprintf('== 2.2. main PHASE (CPU) ==\n');
+        Load_phase_main_cpu = processor_load.cpu_load.comp_uti;
+        num_active_cores_main_cpu = min(total_cpu_cores, processor_load.cpu_load.comp_core); % Total active cores
+        fprintf('  Load (main_uti):            %f\n', Load_phase_main_cpu);
+        fprintf('  Total Active Cores:         %f\n', num_active_cores_main_cpu);
+
+        chip_equivalent_load = num_active_cores_main_cpu / single_cpu_cores;
+        fprintf('  Chip Equivalent Load (TotalActive / CoresPerChip): %f\n', chip_equivalent_load);
+
+         P_active_main_cpu = cap_inter_cpu * (Load_phase_main_cpu / cpu_load_tdp) * chip_equivalent_load;
+        fprintf('  FINAL P_active_main (ALL chips): %f W\n', P_active_main_cpu);
+        fprintf('\n');
+
+
+        % --- 5. Phase 3: Result ---
+        fprintf('== 2.2. result PHASE (CPU) ==\n');
+        Load_phase_result_cpu = processor_load.cpu_load.result_uti;
+        num_active_cores_result_cpu = min(total_cpu_cores, processor_load.cpu_load.result_core); % Total active cores
+        fprintf('  Load (result_uti):            %f\n', Load_phase_result_cpu);
+        fprintf('  Total Active Cores:         %f\n', num_active_cores_result_cpu);
+
+        chip_equivalent_load = num_active_cores_result_cpu / single_cpu_cores;
+        fprintf('  Chip Equivalent Load (TotalActive / CoresPerChip): %f\n', chip_equivalent_load);
+
+         P_active_result_cpu = cap_inter_cpu * (Load_phase_result_cpu / cpu_load_tdp) * chip_equivalent_load;
+        fprintf('  FINAL P_active_result (ALL chips): %f W\n', P_active_result_cpu);
+        fprintf('\n');
+    end
+else
+    fprintf('  num_cpu is %f. No CPUs, so Active Power is 0.\n', num_cpu);
+end
+fprintf('--- END PART 2: CPU ACTIVE POWER DEBUG ---\n\n');
+
+
+
+
+
+fprintf('\n\n--- START PART 3: CPU LEAKAGE POWER DEBUG ---\n');
+% --- 0. Initialize Output for this section ---
+P_leakage_total_cpu = 0;
+if num_cpu > 0
+    % --- 1. Get Specs from Struct ---
+    % These values were already printed in Part 1
+    cpu_tdp = processor_conf.cpu_conf.TDP;
+    cpu_act_pwr_split = processor_conf.cpu_conf.ACT_pwr_split;
+    cpu_t_base = processor_conf.cpu_conf.TDP_Tj; % (Tj spec @ TDP)
+    cpu_t_max = processor_conf.cpu_conf.Tj_max;   % (Max temp)
+    fprintf('== 3.1. LEAKAGE INTERMEDIATES (1 CHIP) ==\n');
+    % --- 2. Calculate Base Leakage & Slopes ---
+    P_leak_base_1_chip_cpu = cpu_tdp * (1 - cpu_act_pwr_split);
+    fprintf('  P_leak_base (1 chip): %f W\n', P_leak_base_1_chip_cpu);
+    % High Slope
+    Slope_high_cpu = 0;
+    if (cpu_t_max - cpu_t_base) > 0
+        Slope_high_cpu = P_leak_base_1_chip_cpu / (cpu_t_max - cpu_t_base);
+        fprintf('  Slope_high:           %f\n', Slope_high_cpu);
+    else
+        fprintf('  WARNING: T_max (%f) <= T_base (%f). Slope_high set to 0.\n', cpu_t_max, cpu_t_base);
+    end
+    % Low Slope
+    Slope_low_cpu = 0;
+    if (cpu_t_base - 20) > 0
+        Slope_low_cpu = 0.5 * P_leak_base_1_chip_cpu / (cpu_t_base - 20);
+        fprintf('  Slope_low:            %f\n', Slope_low_cpu);
+    else
+        fprintf('  WARNING: T_base (%f) <= 20C. Slope_low set to 0.\n', cpu_t_base);
+    end
+    fprintf('\n');
+    % --- 3. Final Leakage Calculation ---
+    fprintf('== 3.2. FINAL LEAKAGE CALCULATION (1 CHIP) ==\n');
+    fprintf('  Input T_projected (proj_cpu_T): %f C\n', proj_cpu_T);
+    fprintf('  Input T_base is:              %f C\n', cpu_t_base);
+      fprintf('  CPU Spec Volate %f V\n'              , processor_conf.cpu_conf.V_spec);
+    fprintf('  CPU current Voltage %f V\n'          , processor_conf.cpu_conf.V_cpu);
+    P_leak_final_1_chip_cpu = P_leak_base_1_chip_cpu; % Start with base
+    if proj_cpu_T > cpu_t_base
+        fprintf('  (Using HIGH slope logic: T_projected > T_base)\n');
+        P_leak_final_1_chip_cpu = P_leak_final_1_chip_cpu + ( (proj_cpu_T - cpu_t_base) * Slope_high_cpu );
+    else
+        fprintf('  (Using LOW slope logic: T_projected <= T_base)\n');
+        P_leak_final_1_chip_cpu = P_leak_final_1_chip_cpu + ( (proj_cpu_T - cpu_t_base) * Slope_low_cpu );
+    end
+    fprintf('  P_leak_final (1 chip): %f W\n', P_leak_final_1_chip_cpu);
+    fprintf('\n');
+    % --- 4. Total for All Chips ---
+    P_leakage_total_cpu = num_cpu * (P_leak_final_1_chip_cpu*(processor_conf.cpu_conf.V_cpu/processor_conf.cpu_conf.V_spec));
+    fprintf('  FINAL P_leakage_total (ALL %f chips): %f W\n', num_cpu, P_leakage_total_cpu);
+else
+    fprintf('  num_cpu is %f. No CPUs, so Leakage Power is 0.\n', num_cpu);
+end
+fprintf('--- END PART 3: CPU LEAKAGE POWER DEBUG ---\n\n');
+
+
+% fprintf('\n\n--- START PART 4: GPU ACTIVE POWER DEBUG ---\n');
+% % --- 0. Initialize Outputs for this section ---
+% P_active_init_gpu = 0;
+% P_active_main_gpu = 0;
+% P_active_result_gpu = 0;
+% if num_gpu > 0
+%     % --- 1. Get Specs from Structs ---
+%     gpu_spec_cap = processor_conf.gpu_conf.Switching_cap;
+%     gpu_voltage = processor_conf.gpu_conf.V_gpu;
+% 
+%     % --- CONVERT FREQUENCY (Assuming GHz) ---
+%     gpu_freq_ghz = processor_conf.gpu_conf.F_gpu; 
+%     gpu_freq_hz = gpu_freq_ghz * 1e-9; 
+%     % --- END ---
+%     gpu_load_tdp = processor_conf.gpu_conf.TDP_high_load;
+%     single_gpu_cores = processor_conf.gpu_conf.HD_cores; % This is MaxCores
+%     total_gpu_cores = num_gpu * single_gpu_cores;
+% 
+%     Switching_cap_1_chip_main_cpu = 0;
+% 
+%     % Check for division by zero issues
+%     if single_gpu_cores == 0 || gpu_load_tdp == 0 || gpu_freq_hz == 0
+%          fprintf('  ERROR: single_gpu_cores, gpu_load_tdp, or converted gpu_freq_hz is 0.\n');
+%          fprintf('  single_gpu_cores: %f, gpu_load_tdp: %f, gpu_freq_hz: %e\n', single_gpu_cores, gpu_load_tdp, gpu_freq_hz);
+%     else
+%         % --- 2. Print Constant Multiplier ---
+%         fprintf('== 4.1. CONSTANT MULTIPLIER (GPU) ==\n');
+%         fprintf('  Input Freq (assumed GHz):  %f GHz\n', gpu_freq_ghz);
+%         fprintf('  Converted Freq (Hz):       %e Hz\n', gpu_freq_hz);
+%         fprintf('  Voltage (V_gpu):           %f V\n', gpu_voltage);
+%         fprintf('  V^2 * F term (using Hz):   %e\n', (gpu_voltage^2) * gpu_freq_hz);
+%         fprintf('\n');
+%         % --- 3. Phase 1: Init ---
+%         fprintf('== 4.2. INIT PHASE (GPU) ==\n');
+%         Load_phase_init_gpu = processor_load.gpu_load.init_uti;
+%         num_active_cores_init_gpu = min(total_gpu_cores, processor_load.gpu_load.init_core);
+%         active_cores_per_chip_init_gpu = num_active_cores_init_gpu / num_gpu; 
+%         fprintf('  Load (init_uti):            %f\n', Load_phase_init_gpu);
+%         fprintf('  Active Cores (total):       %f\n', num_active_cores_init_gpu);
+%         fprintf('  Active Cores (per chip):    %f\n', active_cores_per_chip_init_gpu);
+%         % Formula Part 1:
+%         Switching_cap_1_chip_init_gpu = gpu_spec_cap * (Load_phase_init_gpu / gpu_load_tdp) * (active_cores_per_chip_init_gpu / single_gpu_cores);
+%         fprintf('  Intermediate SwitchingCap (1 chip): %e\n', Switching_cap_1_chip_init_gpu);
+%         % Formula Part 2 (uses gpu_freq_hz):
+%         P_active_1_chip_init_gpu = Switching_cap_1_chip_init_gpu * (gpu_voltage^2) * gpu_freq_hz;
+%         fprintf('  P_active (1 chip): %f W\n', P_active_1_chip_init_gpu);
+%         P_active_init_gpu = num_gpu * P_active_1_chip_init_gpu;
+%         fprintf('  FINAL P_active_init (ALL %f chips): %f W\n', num_gpu, P_active_init_gpu);
+%         fprintf('\n');
+%         % --- 4. Phase 2: Main (Comp) ---
+%         fprintf('== 4.3. MAIN PHASE (GPU) ==\n');
+%         Load_phase_main_gpu = processor_load.gpu_load.comp_uti;
+%         num_active_cores_main_gpu = min(total_gpu_cores, processor_load.gpu_load.comp_core);
+%         active_cores_per_chip_main_gpu = num_active_cores_main_gpu / num_gpu;
+%         fprintf('  Load (comp_uti):            %f\n', Load_phase_main_gpu);
+%         fprintf('  Active Cores (total):       %f\n', num_active_cores_main_gpu);
+%         fprintf('  Active Cores (per chip):    %f\n', active_cores_per_chip_main_gpu);
+%         % Formula Part 1:
+%         Switching_cap_1_chip_main_gpu = gpu_spec_cap * (Load_phase_main_gpu / gpu_load_tdp) * (active_cores_per_chip_main_gpu / single_gpu_cores);
+%         fprintf('  Intermediate SwitchingCap (1 chip): %e\n', Switching_cap_1_chip_main_gpu);
+%         % Formula Part 2 (uses gpu_freq_hz):
+%         P_active_1_chip_main_gpu = Switching_cap_1_chip_main_gpu * (gpu_voltage^2) * gpu_freq_hz;
+%         fprintf('  P_active (1 chip): %f W\n', P_active_1_chip_main_gpu);
+%         P_active_main_gpu = num_gpu * P_active_1_chip_main_gpu;
+%         fprintf('  FINAL P_active_main (ALL %f chips): %f W\n', num_gpu, P_active_main_gpu);
+%         fprintf('\n');
+%         % --- 5. Phase 3: Result ---
+%         fprintf('== 4.4. RESULT PHASE (GPU) ==\n');
+%         Load_phase_result_gpu = processor_load.gpu_load.result_uti;
+%         num_active_cores_result_gpu = min(total_gpu_cores, processor_load.gpu_load.result_core);
+%         active_cores_per_chip_result_gpu = num_active_cores_result_gpu / num_gpu;
+%         fprintf('  Load (result_uti):          %f\n', Load_phase_result_gpu);
+%         fprintf('  Active Cores (total):       %f\n', num_active_cores_result_gpu);
+%         fprintf('  Active Cores (per chip):    %f\n', active_cores_per_chip_result_gpu);
+%         % Formula Part 1:
+%         Switching_cap_1_chip_result_gpu = gpu_spec_cap * (Load_phase_result_gpu / gpu_load_tdp) * (active_cores_per_chip_result_gpu / single_gpu_cores);
+%         fprintf('  Intermediate SwitchingCap (1 chip): %e\n', Switching_cap_1_chip_result_gpu);
+%         % Formula Part 2 (uses gpu_freq_hz):
+%         P_active_1_chip_result_gpu = Switching_cap_1_chip_result_gpu * (gpu_voltage^2) * gpu_freq_hz;
+%         fprintf('  P_active (1 chip): %f W\n', P_active_1_chip_result_gpu);
+%         P_active_result_gpu = num_gpu * P_active_1_chip_result_gpu;
+%         fprintf('  FINAL P_active_result (ALL %f chips): %f W\n', num_gpu, P_active_result_gpu);
+%         fprintf('\n');
+%     end
+% else
+%     fprintf('  num_gpu is %f. No GPUs, so Active Power is 0.\n', num_gpu);
+% end
+% fprintf('--- END PART 4: GPU ACTIVE POWER DEBUG ---\n\n');
+
+% --- PASTE THIS NEW CODE BLOCK (PART 4, v11) ---
+
+fprintf('\n\n--- START PART 4: GPU ACTIVE POWER DEBUG ---\n');
+
+% --- 0. Initialize Outputs for this section ---
+P_active_init_gpu = 0;
+P_active_main_gpu = 0;
+P_active_result_gpu = 0;
+
+if num_gpu > 0
+    % --- 1. Get Specs from Structs ---
+    gpu_spec_cap = processor_conf.gpu_conf.Switching_cap;
+    gpu_voltage = processor_conf.gpu_conf.V_gpu;
+
+    % --- CORRECTED: Read F_gpu from struct and convert ---
+    gpu_freq_hz = processor_conf.gpu_conf.F_gpu; % Read from struct
+    gpu_freq_ghz = gpu_freq_hz * 1e-9;             % Convert GHz to Hz
+    % --- END ---
+
+    gpu_load_tdp = processor_conf.gpu_conf.TDP_high_load;
+    single_gpu_cores = processor_conf.gpu_conf.HD_cores; % MaxCores for 1 chip
+    total_gpu_cores = num_gpu * single_gpu_cores;
+
+    % Check for division by zero issues
+    if single_gpu_cores == 0 || gpu_load_tdp == 0 || gpu_freq_hz == 0
+         fprintf('  ERROR: single_gpu_cores, gpu_load_tdp, or F_gpu is 0.\n');
+         fprintf('  single_gpu_cores: %f, gpu_load_tdp: %f, F_gpu (input): %f\n', single_gpu_cores, gpu_load_tdp, gpu_freq_ghz);
+    else
+        % --- 2. Print Constant Multiplier ---
+        fprintf('== 4.1. CONSTANT MULTIPLIER (GPU) ==\n');
+        fprintf('   Spec Cap                  %f (Faraday)\n',gpu_spec_cap);
+        fprintf('  Input Freq (F_gpu):        %f Hz\n', gpu_freq_hz);
+        fprintf('  Converted Freq (GHz):       %e GHz\n', gpu_freq_ghz);
+        fprintf('  Voltage (V_gpu):           %f V\n', gpu_voltage);
+        fprintf('  V^2 * F term:              %e\n', (gpu_voltage^2) * gpu_freq_ghz);
+        fprintf('\n');
+
+        % Calculate C intermidiate
+        cap_inter_gpu = gpu_spec_cap * (gpu_voltage^2) * gpu_freq_ghz;
+
+
+        fprintf('\n');
+        fprintf(' Intermidiate gpu cap %f\n', cap_inter_gpu);
+        fprintf('\n');
+
+        % --- 3. Phase 1: Init ---
+        fprintf('== 4.2. INIT PHASE (GPU) ==\n');
+        Load_phase_init_gpu = processor_load.gpu_load.init_uti;
+        num_active_cores_init_gpu = min(total_gpu_cores, processor_load.gpu_load.init_core); % Total active cores
+
+        fprintf('  Load (init_uti):            %f\n', Load_phase_init_gpu);
+        fprintf('  Load (spec):            %f\n', gpu_load_tdp);
+        fprintf('  Total Active Cores:         %f\n', num_active_cores_init_gpu);
+        fprintf('  Cores per Chip (MaxCores):  %f\n', single_gpu_cores);
+
+        chip_equivalent_load = num_active_cores_init_gpu / single_gpu_cores;
+        fprintf('  Chip Equivalent Load (TotalActive / CoresPerChip): %f\n', chip_equivalent_load);
+
+        P_active_init_gpu = cap_inter_gpu * (Load_phase_init_gpu / gpu_load_tdp) * (num_active_cores_init_gpu / single_gpu_cores);
+
+        fprintf('  FINAL P_active_init (ALL chips): %f W\n', P_active_init_gpu);
+        fprintf('\n');
+
+        % --- 4. Phase 2: Main (Comp) ---
+        fprintf('== 4.3. MAIN PHASE (GPU) ==\n');
+        Load_phase_main_gpu = processor_load.gpu_load.comp_uti;
+        num_active_cores_main_gpu = min(total_gpu_cores, processor_load.gpu_load.comp_core); % Total active cores
+
+        fprintf('  Load (main_uti):            %f\n', Load_phase_main_gpu);
+        fprintf('  Load (spec):            %f\n', gpu_load_tdp);
+        fprintf('  Total Active Cores:         %f\n', num_active_cores_main_gpu);
+        fprintf('  Cores per Chip (MaxCores):  %f\n', single_gpu_cores);
+
+        chip_equivalent_load = num_active_cores_main_gpu / single_gpu_cores;
+        fprintf('  Chip Equivalent Load (TotalActive / CoresPerChip): %f\n', chip_equivalent_load);
+
+        P_active_main_gpu = cap_inter_gpu * (Load_phase_main_gpu / gpu_load_tdp) * (num_active_cores_main_gpu / single_gpu_cores);
+
+        fprintf('  FINAL P_active_main (ALL chips): %f W\n', P_active_main_gpu);
+        fprintf('\n')
+
+        % --- 5. Phase 3: Result ---
+       fprintf('== 4.3. result PHASE (GPU) ==\n');
+        Load_phase_result_gpu = processor_load.gpu_load.result_uti;
+        num_active_cores_result_gpu = min(total_gpu_cores, processor_load.gpu_load.result_core); % Total active cores
+
+        fprintf('  Load (result_uti):            %f\n', Load_phase_result_gpu);
+        fprintf('  Load (spec):            %f\n', gpu_load_tdp);
+        fprintf('  Total Active Cores:         %f\n', num_active_cores_result_gpu);
+        fprintf('  Cores per Chip (MaxCores):  %f\n', single_gpu_cores);
+
+        chip_equivalent_load = num_active_cores_result_gpu / single_gpu_cores;
+        fprintf('  Chip Equivalent Load (TotalActive / CoresPerChip): %f\n', chip_equivalent_load);
+
+        P_active_result_gpu = cap_inter_gpu * (Load_phase_result_gpu / gpu_load_tdp) * (num_active_cores_result_gpu / single_gpu_cores);
+
+        fprintf('  FINAL P_active_result (ALL chips): %f W\n', P_active_result_gpu);
+        fprintf('\n')
+    end
+else
+    fprintf('  num_gpu is %f. No GPUs, so Active Power is 0.\n', num_gpu);
+end
+fprintf('--- END PART 4: GPU ACTIVE POWER DEBUG ---\n\n');
+
+
+
+
+fprintf('\n\n--- START PART 5: GPU LEAKAGE POWER DEBUG ---\n');
+% --- 0. Initialize Output for this section ---
+P_leakage_total_gpu = 0;
+if num_gpu > 0
+    % --- 1. Get Specs from Struct ---
+    gpu_tdp = processor_conf.gpu_conf.TDP;
+    gpu_act_pwr_split = processor_conf.gpu_conf.ACT_pwr_split;
+    gpu_t_base = processor_conf.gpu_conf.TDP_Tj; % (Tj spec @ TDP)
+    gpu_t_max = processor_conf.gpu_conf.Tj_max;   % (Max temp)
+    fprintf('== 5.1. LEAKAGE INTERMEDIATES (1 CHIP) ==\n');
+    % --- 2. Calculate Base Leakage & Slopes ---
+    P_leak_base_1_chip_gpu = gpu_tdp * (1 - gpu_act_pwr_split);
+    fprintf('  P_leak_base (1 chip): %f W\n', P_leak_base_1_chip_gpu);
+    % High Slope
+    Slope_high_gpu = 0;
+    if (gpu_t_max - gpu_t_base) > 0
+        Slope_high_gpu = P_leak_base_1_chip_gpu / (gpu_t_max - gpu_t_base);
+        fprintf('  Slope_high:           %f\n', Slope_high_gpu);
+    else
+        fprintf('  WARNING: T_max (%f) <= T_base (%f). Slope_high set to 0.\n', gpu_t_max, gpu_t_base);
+    end
+    % Low Slope
+    Slope_low_gpu = 0;
+    if (gpu_t_base - 20) > 0
+        Slope_low_gpu = 0.5 * P_leak_base_1_chip_gpu / (gpu_t_base - 20);
+        fprintf('  Slope_low:            %f\n', Slope_low_gpu);
+    else
+        fprintf('  WARNING: T_base (%f) <= 20C. Slope_low set to 0.\n', gpu_t_base);
+    end
+    fprintf('\n');
+    % --- 3. Final Leakage Calculation ---
+    fprintf('== 5.2. FINAL LEAKAGE CALCULATION (1 CHIP) ==\n');
+    fprintf('  Input T_projected (proj_gpu_T): %f C\n', proj_gpu_T);
+    fprintf('  Input T_base is:              %f C\n', gpu_t_base);
+    fprintf('  GPU Spec Volate %f V\n'              , processor_conf.gpu_conf.V_spec);
+    fprintf('  GPU current Voltage %f V\n'          , processor_conf.gpu_conf.V_gpu);
+    P_leak_final_1_chip_gpu = P_leak_base_1_chip_gpu; % Start with base
+    if proj_gpu_T > gpu_t_base
+        fprintf('  (Using HIGH slope logic: T_projected > T_base)\n');
+        % --- *** CORRECTION HERE *** ---
+        P_leak_final_1_chip_gpu = P_leak_final_1_chip_gpu + ( (proj_gpu_T - gpu_t_base) * Slope_high_gpu );
+        % --- *** END CORRECTION *** ---
+    else
+        fprintf('  (Using LOW slope logic: T_projected <= T_base)\n');
+        P_leak_final_1_chip_gpu = P_leak_final_1_chip_gpu + ( (proj_gpu_T - gpu_t_base) * Slope_low_gpu );
+    end
+    fprintf('  P_leak_final (1 chip): %f W\n', P_leak_final_1_chip_gpu);
+    fprintf('\n');
+    % --- 4. Total for All Chips ---
+
+    P_leakage_total_gpu = num_gpu * (P_leak_final_1_chip_gpu*(processor_conf.gpu_conf.V_gpu/processor_conf.gpu_conf.V_spec));
+    fprintf('  FINAL P_leakage_total (ALL %f chips): %f W\n', num_gpu, P_leakage_total_gpu);
+else
+    fprintf('  num_gpu is %f. No GPUs, so Leakage Power is 0.\n', num_gpu);
+end
+fprintf('--- END PART 5: GPU LEAKAGE POWER DEBUG ---\n\n');
+
+% --- Set dummy outputs to satisfy Coder ---
+total_server_power = 0;
+max_power = 0;
+
+
+fprintf('\n\n--- START PART 6: FINAL SERVER POWER CALCULATION ---\n');
+
+% --- 1. Combine CPU Power per Phase ---
+% Power = Constant Leakage + Phased Active
+total_cpu_power_init = P_leakage_total_cpu + P_active_init_cpu;
+total_cpu_power_main = P_leakage_total_cpu + P_active_main_cpu;
+total_cpu_power_result = P_leakage_total_cpu + P_active_result_cpu;
+
+fprintf('== 6.1. TOTAL CPU POWER (ALL CHIPS) ==\n');
+fprintf('  Total CPU Power (Init)  : %f W (Leakage) + %f W (Active) = %f W\n', P_leakage_total_cpu, P_active_init_cpu, total_cpu_power_init);
+fprintf('  Total CPU Power (Main)  : %f W (Leakage) + %f W (Active) = %f W\n', P_leakage_total_cpu, P_active_main_cpu, total_cpu_power_main);
+fprintf('  Total CPU Power (Result): %f W (Leakage) + %f W (Active) = %f W\n', P_leakage_total_cpu, P_active_result_cpu, total_cpu_power_result);
+fprintf('\n');
+
+% --- 2. Combine GPU Power per Phase ---
+% Power = Constant Leakage + Phased Active
+total_gpu_power_init = P_leakage_total_gpu + P_active_init_gpu;
+total_gpu_power_main = P_leakage_total_gpu + P_active_main_gpu;
+total_gpu_power_result = P_leakage_total_gpu + P_active_result_gpu;
+
+fprintf('== 6.2. TOTAL GPU POWER (ALL CHIPS) ==\n');
+fprintf('  Total GPU Power (Init)  : %f W (Leakage) + %f W (Active) = %f W\n', P_leakage_total_gpu, P_active_init_gpu, total_gpu_power_init);
+fprintf('  Total GPU Power (Main)  : %f W (Leakage) + %f W (Active) = %f W\n', P_leakage_total_gpu, P_active_main_gpu, total_gpu_power_main);
+fprintf('  Total GPU Power (Result): %f W (Leakage) + %f W (Active) = %f W\n', P_leakage_total_gpu, P_active_result_gpu, total_gpu_power_result);
+fprintf('\n');
+
+% --- 3. Final Server Power per Phase (includes overhead) ---
+total_server_power_init = server_overhead + total_cpu_power_init + total_gpu_power_init;
+total_server_power_main = server_overhead + total_cpu_power_main + total_gpu_power_main;
+total_server_power_result = server_overhead + total_cpu_power_result + total_gpu_power_result;
+
+fprintf('== 6.3. FINAL SERVER POWER (PER PHASE) ==\n');
+fprintf('  Server Power (Init)  : %f (Overhead) + %f (CPU) + %f (GPU) = %f W\n', server_overhead, total_cpu_power_init, total_gpu_power_init, total_server_power_init);
+fprintf('  Server Power (Main)  : %f (Overhead) + %f (CPU) + %f (GPU) = %f W\n', server_overhead, total_cpu_power_main, total_gpu_power_main, total_server_power_main);
+fprintf('  Server Power (Result): %f (Overhead) + %f (CPU) + %f (GPU) = %f W\n', server_overhead, total_cpu_power_result, total_gpu_power_result, total_server_power_result);
+fprintf('\n');
+
+% --- 4. Final Outputs for Simulink ---
+max_power = max([total_server_power_init, total_server_power_main, total_server_power_result]);
+total_server_power = total_server_power_init + total_server_power_main + total_server_power_result;
+
+fprintf('== 6.4. FINAL SIMULINK OUTPUTS ==\n');
+fprintf('  max_power: %f W\n', max_power);
+fprintf('  total_server_power (Sum of Phases): %f W\n', total_server_power);
+
+fprintf('--- END PART 6: FINAL SERVER POWER CALCULATION ---\n\n');
+
+end
+
+% function [total_server_power, max_power] = calculatePower_DEBUG(server_overhead, num_cpu, num_gpu, processor_load, processor_conf, proj_cpu_T, proj_gpu_T)
+% %#codegen
+% % This is a DEBUGGING function.
+% % It calculates power based on the new logic, including:
+% % - Active Power: Scaled by V^2, F_actual, Load, and Cores
+% % - Leakage Power: Scaled by Temperature AND Voltage (V_actual / V_spec)
+% 
+% fprintf('\n\n--- START DEBUG PRINT ---\n');
+% % --- Print Simple Inputs ---
+% fprintf('== 1. SCALAR INPUTS ==\n');
+% fprintf('  server_overhead: %f\n', server_overhead);
+% fprintf('  num_cpu:         %f\n', num_cpu);
+% fprintf('  num_gpu:         %f\n', num_gpu);
+% fprintf('  proj_cpu_T:      %f C\n', proj_cpu_T);
+% fprintf('  proj_gpu_T:      %f C\n', proj_gpu_T);
+% fprintf('\n');
+% 
+% % --- Print CPU Config Struct ---
+% fprintf('== 2. PROCESSOR_CONF (CPU) ==\n');
+% if num_cpu > 0
+%     fprintf('  HD_cores:        %f\n', processor_conf.cpu_conf.HD_cores);
+%     fprintf('  TDP:             %f W\n', processor_conf.cpu_conf.TDP);
+%     fprintf('  ACT_pwr_split:   %f\n', processor_conf.cpu_conf.ACT_pwr_split);
+%     fprintf('  TDP_Tj (T_base): %f C\n', processor_conf.cpu_conf.TDP_Tj);
+%     fprintf('  Tj_max (T_max):  %f C\n', processor_conf.cpu_conf.Tj_max);
+%     fprintf('  Switching_cap:   %e\n', processor_conf.cpu_conf.Switching_cap);
+%     fprintf('  V_cpu (Actual):  %f V\n', processor_conf.cpu_conf.V_cpu);
+%     fprintf('  V_spec_cpu (Spec): %f V\n', processor_conf.cpu_conf.V_spec); % ASSUMED FIELD NAME
+%     fprintf('  F_cpu (input):   %f GHz\n', processor_conf.cpu_conf.F_cpu);
+%     fprintf('  TDP_high_load:   %f\n', processor_conf.cpu_conf.TDP_high_load);
+% else
+%     fprintf('  (No CPUs, skipping print)\n');
+% end
+% fprintf('\n');
+% 
+% % --- Print CPU Load Struct ---
+% fprintf('== 3. PROCESSOR_LOAD (CPU) ==\n');
+% % (No changes here)
+% if num_cpu > 0
+%     fprintf('  init_uti:    %f\n', processor_load.cpu_load.init_uti);
+%     fprintf('  init_core:   %f\n', processor_load.cpu_load.init_core);
+%     fprintf('  comp_uti:    %f\n', processor_load.cpu_load.comp_uti);
+%     fprintf('  comp_core:   %f\n', processor_load.cpu_load.comp_core);
+%     fprintf('  result_uti:  %f\n', processor_load.cpu_load.result_uti);
+%     fprintf('  result_core: %f\n', processor_load.cpu_load.result_core);
+% else
+%     fprintf('  (No CPUs, skipping print)\n');
+% end
+% fprintf('\n');
+% 
+% % --- Print GPU Config Struct ---
+% fprintf('== 4. PROCESSOR_CONF (GPU) ==\n');
+% if num_gpu > 0
+%     fprintf('  HD_cores:        %f\n', processor_conf.gpu_conf.HD_cores);
+%     fprintf('  TDP:             %f W\n', processor_conf.gpu_conf.TDP);
+%     fprintf('  ACT_pwr_split:   %f\n', processor_conf.gpu_conf.ACT_pwr_split);
+%     fprintf('  TDP_Tj (T_base): %f C\n', processor_conf.gpu_conf.TDP_Tj);
+%     fprintf('  Tj_max (T_max):  %f C\n', processor_conf.gpu_conf.Tj_max);
+%     fprintf('  Switching_cap:   %e\n', processor_conf.gpu_conf.Switching_cap);
+%     fprintf('  V_gpu (Actual):  %f V\n', processor_conf.gpu_conf.V_gpu);
+%     fprintf('  V_spec_gpu (Spec): %f V\n', processor_conf.gpu_conf.V_spec); % ASSUMED FIELD NAME
+%     fprintf('  F_gpu (input):   %f GHz\n', processor_conf.gpu_conf.F_gpu);
+%     fprintf('  TDP_high_load:   %f\n', processor_conf.gpu_conf.TDP_high_load);
+% else
+%     fprintf('  (No GPUs, skipping print)\n');
+% end
+% fprintf('\n');
+% 
+% % --- Print GPU Load Struct ---
+% fprintf('== 5. PROCESSOR_LOAD (GPU) ==\n');
+% % (No changes here)
+% if num_gpu > 0
+%     fprintf('  init_uti:    %f\n', processor_load.gpu_load.init_uti);
+%     fprintf('  init_core:   %f\n', processor_load.gpu_load.init_core);
+%     fprintf('  comp_uti:    %f\n', processor_load.gpu_load.comp_uti);
+%     fprintf('  comp_core:   %f\n', processor_load.gpu_load.comp_core);
+%     fprintf('  result_uti:  %f\n', processor_load.gpu_load.result_uti);
+%     fprintf('  result_core: %f\n', processor_load.gpu_load.result_core);
+% else
+%     fprintf('  (No GPUs, skipping print)\n');
+% end
+% fprintf('---  END DEBUG PRINT  ---\n\n');
+% 
+% 
+% % --- PART 2: CPU ACTIVE POWER ---
+% fprintf('\n\n--- START PART 2: CPU ACTIVE POWER DEBUG ---\n');
+% P_active_init_cpu = 0;
+% P_active_main_cpu = 0;
+% P_active_result_cpu = 0;
+% if num_cpu > 0
+%     cpu_spec_cap = processor_conf.cpu_conf.Switching_cap;
+%     cpu_voltage = processor_conf.cpu_conf.V_cpu;
+%     cpu_freq_ghz = processor_conf.cpu_conf.F_cpu; 
+%     cpu_freq_hz = cpu_freq_ghz * 1e-9; % Convert GHz to Hz
+%     cpu_load_tdp = processor_conf.cpu_conf.TDP_high_load;
+%     single_cpu_cores = processor_conf.cpu_conf.HD_cores;
+%     total_cpu_cores = num_cpu * single_cpu_cores;
+% 
+%     if single_cpu_cores == 0 || cpu_load_tdp == 0 || cpu_freq_hz == 0
+%          fprintf('  ERROR: single_cpu_cores, cpu_load_tdp, or F_cpu is 0.\n');
+%     else
+%         fprintf('== 2.1. CONSTANT MULTIPLIER (CPU) ==\n');
+%         fprintf('  Input Freq (F_cpu):        %f GHz\n', cpu_freq_ghz);
+%         fprintf('  Converted Freq (Hz):       %e Hz\n', cpu_freq_hz);
+%         fprintf('  Voltage (V_cpu):           %f V\n', cpu_voltage);
+%         fprintf('  V^2 * F term:              %e\n', (cpu_voltage^2) * cpu_freq_hz);
+%         fprintf('\n');
+% 
+%         % --- Phase 1: Init ---
+%         fprintf('== 2.2. INIT PHASE (CPU) ==\n');
+%         Load_phase_init_cpu = processor_load.cpu_load.init_uti;
+%         num_active_cores_init_cpu = min(total_cpu_cores, processor_load.cpu_load.init_core);
+%         chip_equivalent_load = num_active_cores_init_cpu / single_cpu_cores;
+%         Switching_cap_total_init_cpu = cpu_spec_cap * (Load_phase_init_cpu / cpu_load_tdp) * chip_equivalent_load;
+%         P_active_init_cpu = Switching_cap_total_init_cpu * (cpu_voltage^2) * cpu_freq_hz;
+%         fprintf('  FINAL P_active_init (ALL chips): %f W\n', P_active_init_cpu);
+%         fprintf('\n');
+% 
+%         % --- Phase 2: Main (Comp) ---
+%         fprintf('== 2.3. MAIN PHASE (CPU) ==\n');
+%         Load_phase_main_cpu = processor_load.cpu_load.comp_uti;
+%         num_active_cores_main_cpu = min(total_cpu_cores, processor_load.cpu_load.comp_core);
+%         chip_equivalent_load = num_active_cores_main_cpu / single_cpu_cores;
+%         Switching_cap_total_main_cpu = cpu_spec_cap * (Load_phase_main_cpu / cpu_load_tdp) * chip_equivalent_load;
+%         P_active_main_cpu = Switching_cap_total_main_cpu * (cpu_voltage^2) * cpu_freq_hz;
+%         fprintf('  FINAL P_active_main (ALL chips): %f W\n', P_active_main_cpu);
+%         fprintf('\n');
+% 
+%         % --- Phase 3: Result ---
+%         fprintf('== 2.4. RESULT PHASE (CPU) ==\n');
+%         Load_phase_result_cpu = processor_load.cpu_load.result_uti;
+%         num_active_cores_result_cpu = min(total_cpu_cores, processor_load.cpu_load.result_core);
+%         chip_equivalent_load = num_active_cores_result_cpu / single_cpu_cores;
+%         Switching_cap_total_result_cpu = cpu_spec_cap * (Load_phase_result_cpu / cpu_load_tdp) * chip_equivalent_load;
+%         P_active_result_cpu = Switching_cap_total_result_cpu * (cpu_voltage^2) * cpu_freq_hz;
+%         fprintf('  FINAL P_active_result (ALL chips): %f W\n', P_active_result_cpu);
+%         fprintf('\n');
+%     end
+% else
+%     fprintf('  num_cpu is %f. No CPUs, so Active Power is 0.\n', num_cpu);
+% end
+% fprintf('--- END PART 2: CPU ACTIVE POWER DEBUG ---\n\n');
+% 
+% 
+% % --- PART 3: CPU LEAKAGE POWER ---
+% fprintf('\n\n--- START PART 3: CPU LEAKAGE POWER DEBUG ---\n');
+% P_leakage_total_cpu = 0;
+% if num_cpu > 0
+%     % --- Get Specs ---
+%     cpu_tdp = processor_conf.cpu_conf.TDP;
+%     cpu_act_pwr_split = processor_conf.cpu_conf.ACT_pwr_split;
+%     cpu_t_base = processor_conf.cpu_conf.TDP_Tj;
+%     cpu_t_max = processor_conf.cpu_conf.Tj_max;
+% 
+%     % --- NEW: Get Voltage Specs for Scaling ---
+%     cpu_v_actual = processor_conf.cpu_conf.V_cpu;
+%     cpu_v_spec = processor_conf.cpu_conf.V_spec; % ASSUMED FIELD NAME
+%     voltage_scaling_factor_cpu = 1.0;
+% 
+%     if cpu_v_spec > 0
+%         voltage_scaling_factor_cpu = cpu_v_actual / cpu_v_spec;
+%     else
+%         fprintf('  WARNING: V_spec_cpu is 0. Cannot scale leakage. Defaulting to 1.0\n');
+%     end
+% 
+%     fprintf('== 3.1. LEAKAGE INTERMEDIATES (1 CHIP) ==\n');
+%     P_leak_base_1_chip_cpu = cpu_tdp * (1 - cpu_act_pwr_split);
+%     fprintf('  P_leak_base (1 chip): %f W\n', P_leak_base_1_chip_cpu);
+% 
+%     % --- Slopes ---
+%     Slope_high_cpu = 0;
+%     if (cpu_t_max - cpu_t_base) > 0
+%         Slope_high_cpu = P_leak_base_1_chip_cpu / (cpu_t_max - cpu_t_base);
+%     else
+%         fprintf('  WARNING: T_max <= T_base. Slope_high set to 0.\n');
+%     end
+%     Slope_low_cpu = 0;
+%     if (cpu_t_base - 20) > 0
+%         Slope_low_cpu = 0.5 * P_leak_base_1_chip_cpu / (cpu_t_base - 20);
+%     else
+%         fprintf('  WARNING: T_base <= 20C. Slope_low set to 0.\n');
+%     end
+%     fprintf('\n');
+% 
+%     % --- Temp-Based Calculation ---
+%     fprintf('== 3.2. TEMPERATURE-SCALED LEAKAGE (1 CHIP) ==\n');
+%     P_leak_temp_scaled_1_chip_cpu = P_leak_base_1_chip_cpu; % Start with base
+%     if proj_cpu_T > cpu_t_base
+%         P_leak_temp_scaled_1_chip_cpu = P_leak_temp_scaled_1_chip_cpu + ( (proj_cpu_T - cpu_t_base) * Slope_high_cpu );
+%     else
+%         P_leak_temp_scaled_1_chip_cpu = P_leak_temp_scaled_1_chip_cpu + ( (proj_cpu_T - cpu_t_base) * Slope_low_cpu );
+%     end
+%     fprintf('  P_leak (temp scaled, 1 chip): %f W\n', P_leak_temp_scaled_1_chip_cpu);
+%     fprintf('\n');
+% 
+%     % --- NEW: Voltage-Based Scaling ---
+%     fprintf('== 3.3. VOLTAGE-SCALED LEAKAGE (1 CHIP) ==\n');
+%     fprintf('  Voltage Scaling Factor (V_actual / V_spec): %f / %f = %f\n', cpu_v_actual, cpu_v_spec, voltage_scaling_factor_cpu);
+%     P_leak_final_1_chip_cpu = P_leak_temp_scaled_1_chip_cpu * voltage_scaling_factor_cpu;
+%     fprintf('  P_leak_final (temp AND voltage scaled, 1 chip): %f W\n', P_leak_final_1_chip_cpu);
+%     fprintf('\n');
+% 
+%     % --- Total ---
+%     P_leakage_total_cpu = num_cpu * P_leak_final_1_chip_cpu;
+%     fprintf('  FINAL P_leakage_total (ALL %f chips): %f W\n', num_cpu, P_leakage_total_cpu);
+% else
+%     fprintf('  num_cpu is %f. No CPUs, so Leakage Power is 0.\n', num_cpu);
+% end
+% fprintf('--- END PART 3: CPU LEAKAGE POWER DEBUG ---\n\n');
+% 
+% 
+% % --- PART 4: GPU ACTIVE POWER ---
+% fprintf('\n\n--- START PART 4: GPU ACTIVE POWER DEBUG ---\n');
+% P_active_init_gpu = 0;
+% P_active_main_gpu = 0;
+% P_active_result_gpu = 0;
+% if num_gpu > 0
+%     gpu_spec_cap = processor_conf.gpu_conf.Switching_cap;
+%     gpu_voltage = processor_conf.gpu_conf.V_gpu;
+%     gpu_freq_ghz = processor_conf.gpu_conf.F_gpu; 
+%     gpu_freq_hz = gpu_freq_ghz * 1e-9; % Convert GHz to Hz
+%     gpu_load_tdp = processor_conf.gpu_conf.TDP_high_load;
+%     single_gpu_cores = processor_conf.gpu_conf.HD_cores;
+%     total_gpu_cores = num_gpu * single_gpu_cores;
+% 
+%     if single_gpu_cores == 0 || gpu_load_tdp == 0 || gpu_freq_hz == 0
+%          fprintf('  ERROR: single_gpu_cores, gpu_load_tdp, or F_gpu is 0.\n');
+%     else
+%         fprintf('== 4.1. CONSTANT MULTIPLIER (GPU) ==\n');
+%         fprintf('  Input Freq (F_gpu):        %f GHz\n', gpu_freq_ghz);
+%         fprintf('  Converted Freq (Hz):       %e Hz\n', gpu_freq_hz);
+%         fprintf('  Voltage (V_gpu):           %f V\n', gpu_voltage);
+%         fprintf('  V^2 * F term:              %e\n', (gpu_voltage^2) * gpu_freq_hz);
+%         fprintf('\n');
+% 
+%         % --- Phase 1: Init ---
+%         fprintf('== 4.2. INIT PHASE (GPU) ==\n');
+%         Load_phase_init_gpu = processor_load.gpu_load.init_uti;
+%         num_active_cores_init_gpu = min(total_gpu_cores, processor_load.gpu_load.init_core);
+%         chip_equivalent_load = num_active_cores_init_gpu / single_gpu_cores;
+%         Switching_cap_total_init_gpu = gpu_spec_cap * (Load_phase_init_gpu / gpu_load_tdp) * chip_equivalent_load;
+%         P_active_init_gpu = Switching_cap_total_init_gpu * (gpu_voltage^2) * gpu_freq_hz;
+%         fprintf('  FINAL P_active_init (ALL chips): %f W\n', P_active_init_gpu);
+%         fprintf('\n');
+% 
+%         % --- Phase 2: Main (Comp) ---
+%         fprintf('== 4.3. MAIN PHASE (GPU) ==\n');
+%         Load_phase_main_gpu = processor_load.gpu_load.comp_uti;
+%         num_active_cores_main_gpu = min(total_gpu_cores, processor_load.gpu_load.comp_core);
+%         chip_equivalent_load = num_active_cores_main_gpu / single_gpu_cores;
+%         Switching_cap_total_main_gpu = gpu_spec_cap * (Load_phase_main_gpu / gpu_load_tdp) * chip_equivalent_load;
+%         P_active_main_gpu = Switching_cap_total_main_gpu * (gpu_voltage^2) * gpu_freq_hz;
+%         fprintf('  FINAL P_active_main (ALL chips): %f W\n', P_active_main_gpu);
+%         fprintf('\n');
+% 
+%         % --- Phase 3: Result ---
+%         fprintf('== 4.4. RESULT PHASE (GPU) ==\n');
+%         Load_phase_result_gpu = processor_load.gpu_load.result_uti;
+%         num_active_cores_result_gpu = min(total_gpu_cores, processor_load.gpu_load.result_core);
+%         chip_equivalent_load = num_active_cores_result_gpu / single_gpu_cores;
+%         Switching_cap_total_result_gpu = gpu_spec_cap * (Load_phase_result_gpu / gpu_load_tdp) * chip_equivalent_load;
+%         P_active_result_gpu = Switching_cap_total_result_gpu * (gpu_voltage^2) * gpu_freq_hz;
+%         fprintf('  FINAL P_active_result (ALL chips): %f W\n', P_active_result_gpu);
+%         fprintf('\n');
+%     end
+% else
+%     fprintf('  num_gpu is %f. No GPUs, so Active Power is 0.\n', num_gpu);
+% end
+% fprintf('--- END PART 4: GPU ACTIVE POWER DEBUG ---\n\n');
+% 
+% 
+% % --- PART 5: GPU LEAKAGE POWER ---
+% fprintf('\n\n--- START PART 5: GPU LEAKAGE POWER DEBUG ---\n');
+% P_leakage_total_gpu = 0;
+% if num_gpu > 0
+%     % --- Get Specs ---
+%     gpu_tdp = processor_conf.gpu_conf.TDP;
+%     gpu_act_pwr_split = processor_conf.gpu_conf.ACT_pwr_split;
+%     gpu_t_base = processor_conf.gpu_conf.TDP_Tj;
+%     gpu_t_max = processor_conf.gpu_conf.Tj_max;
+% 
+%     % --- NEW: Get Voltage Specs for Scaling ---
+%     gpu_v_actual = processor_conf.gpu_conf.V_gpu;
+%     gpu_v_spec = processor_conf.gpu_conf.V_spec; % ASSUMED FIELD NAME
+%     voltage_scaling_factor_gpu = 1.0;
+% 
+%     if gpu_v_spec > 0
+%         voltage_scaling_factor_gpu = gpu_v_actual / gpu_v_spec;
+%     else
+%         fprintf('  WARNING: V_spec_gpu is 0. Cannot scale leakage. Defaulting to 1.0\n');
+%     end
+% 
+%     fprintf('== 5.1. LEAKAGE INTERMEDIATES (1 CHIP) ==\n');
+%     P_leak_base_1_chip_gpu = gpu_tdp * (1 - gpu_act_pwr_split);
+%     fprintf('  P_leak_base (1 chip): %f W\n', P_leak_base_1_chip_gpu);
+% 
+%     % --- Slopes ---
+%     Slope_high_gpu = 0;
+%     if (gpu_t_max - gpu_t_base) > 0
+%         Slope_high_gpu = P_leak_base_1_chip_gpu / (gpu_t_max - gpu_t_base);
+%     else
+%         fprintf('  WARNING: T_max <= T_base. Slope_high set to 0.\n');
+%     end
+%     Slope_low_gpu = 0;
+%     if (gpu_t_base - 20) > 0
+%         Slope_low_gpu = 0.5 * P_leak_base_1_chip_gpu / (gpu_t_base - 20);
+%     else
+%         fprintf('  WARNING: T_base <= 20C. Slope_low set to 0.\n');
+%     end
+%     fprintf('\n');
+% 
+%     % --- Temp-Based Calculation ---
+%     fprintf('== 5.2. TEMPERATURE-SCALED LEAKAGE (1 CHIP) ==\n');
+%     P_leak_temp_scaled_1_chip_gpu = P_leak_base_1_chip_gpu; % Start with base
+%     if proj_gpu_T > gpu_t_base
+%         P_leak_temp_scaled_1_chip_gpu = P_leak_temp_scaled_1_chip_gpu + ( (proj_gpu_T - gpu_t_base) * Slope_high_gpu );
+%     else
+%         P_leak_temp_scaled_1_chip_gpu = P_leak_temp_scaled_1_chip_gpu + ( (proj_gpu_T - gpu_t_base) * Slope_low_gpu );
+%     end
+%     fprintf('  P_leak (temp scaled, 1 chip): %f W\n', P_leak_temp_scaled_1_chip_gpu);
+%     fprintf('\n');
+% 
+%     % --- NEW: Voltage-Based Scaling ---
+%     fprintf('== 5.3. VOLTAGE-SCALED LEAKAGE (1 CHIP) ==\n');
+%     fprintf('  Voltage Scaling Factor (V_actual / V_spec): %f / %f = %f\n', gpu_v_actual, gpu_v_spec, voltage_scaling_factor_gpu);
+%     P_leak_final_1_chip_gpu = P_leak_temp_scaled_1_chip_gpu * voltage_scaling_factor_gpu;
+%     fprintf('  P_leak_final (temp AND voltage scaled, 1 chip): %f W\n', P_leak_final_1_chip_gpu);
+%     fprintf('\n');
+% 
+%     % --- Total ---
+%     P_leakage_total_gpu = num_gpu * P_leak_final_1_chip_gpu;
+%     fprintf('  FINAL P_leakage_total (ALL %f chips): %f W\n', num_gpu, P_leakage_total_gpu);
+% else
+%     fprintf('  num_gpu is %f. No GPUs, so Leakage Power is 0.\n', num_gpu);
+% end
+% fprintf('--- END PART 5: GPU LEAKAGE POWER DEBUG ---\n\n');
+% 
+% 
+% % --- PART 6: FINAL SERVER POWER ---
+% fprintf('\n\n--- START PART 6: FINAL SERVER POWER CALCULATION ---\n');
+% % --- 1. Combine CPU Power per Phase ---
+% total_cpu_power_init = P_leakage_total_cpu + P_active_init_cpu;
+% total_cpu_power_main = P_leakage_total_cpu + P_active_main_cpu;
+% total_cpu_power_result = P_leakage_total_cpu + P_active_result_cpu;
+% fprintf('== 6.1. TOTAL CPU POWER (ALL CHIPS) ==\n');
+% fprintf('  Total CPU Power (Init)  : %f W (Leakage) + %f W (Active) = %f W\n', P_leakage_total_cpu, P_active_init_cpu, total_cpu_power_init);
+% fprintf('  Total CPU Power (Main)  : %f W (Leakage) + %f W (Active) = %f W\n', P_leakage_total_cpu, P_active_main_cpu, total_cpu_power_main);
+% fprintf('  Total CPU Power (Result): %f W (Leakage) + %f W (Active) = %f W\n', P_leakage_total_cpu, P_active_result_cpu, total_cpu_power_result);
+% fprintf('\n');
+% 
+% % --- 2. Combine GPU Power per Phase ---
+% total_gpu_power_init = P_leakage_total_gpu + P_active_init_gpu;
+% total_gpu_power_main = P_leakage_total_gpu + P_active_main_gpu;
+% total_gpu_power_result = P_leakage_total_gpu + P_active_result_gpu;
+% fprintf('== 6.2. TOTAL GPU POWER (ALL CHIPS) ==\n');
+% fprintf('  Total GPU Power (Init)  : %f W (Leakage) + %f W (Active) = %f W\n', P_leakage_total_gpu, P_active_init_gpu, total_gpu_power_init);
+% fprintf('  Total GPU Power (Main)  : %f W (Leakage) + %f W (Active) = %f W\n', P_leakage_total_gpu, P_active_main_gpu, total_gpu_power_main);
+% fprintf('  Total GPU Power (Result): %f W (Leakage) + %f W (Active) = %f W\n', P_leakage_total_gpu, P_active_result_gpu, total_gpu_power_result);
+% fprintf('\n');
+% 
+% % --- 3. Final Server Power per Phase (includes overhead) ---
+% total_server_power_init = server_overhead + total_cpu_power_init + total_gpu_power_init;
+% total_server_power_main = server_overhead + total_cpu_power_main + total_gpu_power_main;
+% total_server_power_result = server_overhead + total_cpu_power_result + total_gpu_power_result;
+% fprintf('== 6.3. FINAL SERVER POWER (PER PHASE) ==\n');
+% fprintf('  Server Power (Init)  : %f (Overhead) + %f (CPU) + %f (GPU) = %f W\n', server_overhead, total_cpu_power_init, total_gpu_power_init, total_server_power_init);
+% fprintf('  Server Power (Main)  : %f (Overhead) + %f (CPU) + %f (GPU) = %f W\n', server_overhead, total_cpu_power_main, total_gpu_power_main, total_server_power_main);
+% fprintf('  Server Power (Result): %f (Overhead) + %f (CPU) + %f (GPU) = %f W\n', server_overhead, total_cpu_power_result, total_gpu_power_result, total_server_power_result);
+% fprintf('\n');
+% 
+% % --- 4. Final Outputs for Simulink ---
+% max_power = max([total_server_power_init, total_server_power_main, total_server_power_result]);
+% total_server_power = total_server_power_init + total_server_power_main + total_server_power_result;
+% fprintf('== 6.4. FINAL SIMULINK OUTPUTS ==\n');
+% fprintf('  max_power: %f W\n', max_power);
+% fprintf('  total_server_power (Sum of Phases): %f W\n', total_server_power);
+% 
+% fprintf('--- END PART 6: FINAL SERVER POWER CALCULATION ---\n\n');
+% 
+% end

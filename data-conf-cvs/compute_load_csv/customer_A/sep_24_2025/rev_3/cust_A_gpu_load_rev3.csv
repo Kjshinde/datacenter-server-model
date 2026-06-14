@@ -1,0 +1,10 @@
+Parameter,Value
+Init_core,12
+Init_uti,0.1
+Init_inst,20000
+Comp_core,20000
+Comp_uti,0.60
+Comp_inst,15e12
+Result_core,5
+Result_uti,0.1
+Result_inst,10000

@@ -1,0 +1,209 @@
+function [total_time,status_text] = calculateTotalTime(num_cpu, num_gpu, processor_load, processor_conf)
+    % This function calculates the total processing time for a server
+    % based on the number of CPUs/GPUs and the given workload.
+    % NOTE :- This funstion works on the assumstion that every instruction
+    % is completed in a single clock cycle.
+
+    %% --- 1. Calculate Total Server Hardware ---
+    % The 'processor_conf' struct holds the specs for a SINGLE device.
+    % We multiply by the number of devices to get the total server resources.
+
+    % --- Output Initialization ---
+    % We MUST assign default values to all outputs at the top.
+    total_time = 0;
+    status_text = "Calculating..."; % Assign a default string
+
+    % Multi Precision scaling Factor
+    Multi_inst_cpu_scale = processor_load.cpu_load.Main_inst_scale;
+    Multi_inst_gpu_scale = processor_load.gpu_load.Main_inst_scale;
+
+    % --- Total CPU Resources ---
+    single_cpu_cores = processor_conf.cpu_conf.HD_cores;
+    total_cpu_cores = num_cpu * single_cpu_cores;
+    % techinically its per core frequency
+    cpu_freq = processor_conf.cpu_conf.F_cpu;
+
+    % --- Total GPU Resources ---
+    single_gpu_cores = processor_conf.gpu_conf.HD_cores;
+    total_gpu_cores = num_gpu * single_gpu_cores;
+    gpu_freq  = processor_conf.gpu_conf.F_gpu;
+    % ----- Software load parameters -----------------
+    % Number of parallel instructions the CPU kernel can divide the given load into
+    SD_cores_cpu_init = processor_load.cpu_load.init_core;
+    SD_cores_cpu_main = processor_load.cpu_load.comp_core;
+    SD_cores_cpu_result = processor_load.cpu_load.result_core;
+    SD_cores_gpu_init = processor_load.gpu_load.init_core;
+    SD_cores_gpu_main = processor_load.gpu_load.comp_core;
+    SD_cores_gpu_result = processor_load.gpu_load.result_core;
+    % print parameters used ( Debugging and sanity check)
+    % fprintf('------------ TIME === Sanity check start === -------------\n');
+    % fprintf('1. CPU and GPU parameters\n');
+    % fprintf('Single CPU cores = %f\n',single_cpu_cores);
+    % fprintf('Single GPU cores = %f\n',single_gpu_cores);
+    % fprintf('Number of CPUs = %f\n',num_cpu);
+    % fprintf('Number of GPUs = %f\n',num_gpu);
+    % fprintf('CPU core frequency = %f\n',cpu_freq);
+    % fprintf('GPU core frequency = %f\n',gpu_freq);
+    % fprintf('--------------------------------\n');
+    % fprintf('CPU init softwares cores = %f\n',SD_cores_cpu_init);
+    % fprintf('CPU main softwares cores = %f\n',SD_cores_cpu_main);
+    % fprintf('CPU main Instruction Scaling Factor = %f\n',Multi_inst_cpu_scale);
+    % fprintf('CPU result softwares cores = %f\n',SD_cores_cpu_result);
+    % fprintf('GPU init softwares cores = %f\n',SD_cores_gpu_init);
+    % fprintf('GPU main softwares cores = %f\n',SD_cores_gpu_main);
+    % fprintf('GPU main Instruction Scaling Factor = %f\n',Multi_inst_gpu_scale);
+    % fprintf('GPU result softwares cores = %f\n',SD_cores_gpu_result);
+    % fprintf('--------------------------------\n');
+
+    %% --- A. CPU Time Calculation ---
+    % Calculate the "effective" cores (the smaller of software vs. hardware)
+
+    % --- Init Phase ---
+    eff_cpu_cores_init = min(SD_cores_cpu_init, total_cpu_cores);
+    % check to prevent dividing by 0
+    if processor_load.cpu_load.init_inst == 0 || eff_cpu_cores_init == 0 || cpu_freq == 0
+        cpu_time_init = 0;
+    else
+        cpu_time_init = processor_load.cpu_load.init_inst / (eff_cpu_cores_init * cpu_freq );
+    end
+
+    % --- Comp / Main Phase ---
+    eff_cpu_cores_main = min(SD_cores_cpu_main, total_cpu_cores);
+    if processor_load.cpu_load.comp_inst == 0 || eff_cpu_cores_main == 0 || cpu_freq == 0
+        cpu_time_main = 0;
+    else
+        cpu_time_main = processor_load.cpu_load.comp_inst / (eff_cpu_cores_main * cpu_freq * Multi_inst_cpu_scale);
+    end
+
+    % --- Result Phase ---
+    eff_cpu_cores_result = min(SD_cores_cpu_result, total_cpu_cores);
+    if processor_load.cpu_load.result_inst == 0 || eff_cpu_cores_result == 0 || cpu_freq == 0
+        cpu_time_result = 0;
+    else
+        cpu_time_result = processor_load.cpu_load.result_inst / (eff_cpu_cores_result * cpu_freq);
+    end
+
+    
+    %% --- B. GPU Time Calculation ---
+    % Calculate the "effective" cores for the GPU
+
+    % --- Init Phase ---
+    eff_gpu_cores_init = min(SD_cores_gpu_init, total_gpu_cores);
+    if processor_load.gpu_load.init_inst == 0 || eff_gpu_cores_init == 0 || gpu_freq == 0
+        gpu_time_init = 0;
+    else
+        gpu_time_init = processor_load.gpu_load.init_inst / (eff_gpu_cores_init * gpu_freq);
+    end
+
+    % --- Comp / Main Phase ---
+    eff_gpu_cores_main = min( SD_cores_gpu_main, total_gpu_cores);
+    if processor_load.gpu_load.comp_inst == 0 || eff_gpu_cores_main == 0 || gpu_freq == 0
+        gpu_time_main = 0;
+    else
+        gpu_time_main = processor_load.gpu_load.comp_inst / (eff_gpu_cores_main * gpu_freq * Multi_inst_gpu_scale);
+    end
+
+    % --- Result Phase ---
+    eff_gpu_cores_result = min(SD_cores_gpu_result, total_gpu_cores);
+    if processor_load.gpu_load.result_inst == 0 || eff_gpu_cores_result == 0 || gpu_freq == 0
+        gpu_time_result = 0;
+    else
+        gpu_time_result = processor_load.gpu_load.result_inst / (eff_gpu_cores_result * gpu_freq);
+    end
+
+    %% --- C. Combine Parallel Phase Times ---
+    % The time for each phase is determined by the slower of the two processors (CPU or GPU).
+    time_init   = max(cpu_time_init, gpu_time_init);
+    time_main   = max(cpu_time_main, gpu_time_main);
+    time_result = max(cpu_time_result, gpu_time_result);
+
+    %% --- D. Sum the Phases for the Final Total ---
+    % Total time is the sum of the time taken for each sequential phase.
+    total_time = time_init + time_main + time_result;
+
+    % --- E. Determine Bottleneck Status (Detailed HW Check with Needed CPUs/GPUs) ---
+    is_cpu_hw_limited = false; % Flag for CPU HW limit
+    is_gpu_hw_limited = false; % Flag for GPU HW limit
+    is_cpu_sw_limited = false; % Separate flag for CPU SW limit
+    is_gpu_sw_limited = false; % Separate flag for GPU SW limit
+    
+    needed_cpu_cores = 0; % Track maximum extra cores needed
+    needed_gpu_cores = 0; % Track maximum extra cores needed
+
+    % Check CPU phases for bottlenecks
+    if SD_cores_cpu_init > total_cpu_cores
+        is_cpu_hw_limited = true; 
+        needed_cpu_cores = max(needed_cpu_cores, SD_cores_cpu_init - total_cpu_cores);
+    elseif SD_cores_cpu_init > 0 && total_cpu_cores > 0
+        is_cpu_sw_limited = true; 
+    end
+    if SD_cores_cpu_main > total_cpu_cores
+        is_cpu_hw_limited = true; 
+        needed_cpu_cores = max(needed_cpu_cores, SD_cores_cpu_main - total_cpu_cores);
+    elseif SD_cores_cpu_main > 0 && total_cpu_cores > 0
+        is_cpu_sw_limited = true; 
+    end
+     if SD_cores_cpu_result > total_cpu_cores
+        is_cpu_hw_limited = true; 
+        needed_cpu_cores = max(needed_cpu_cores, SD_cores_cpu_result - total_cpu_cores);
+    elseif SD_cores_cpu_result > 0 && total_cpu_cores > 0
+        is_cpu_sw_limited = true; 
+    end
+
+    % Check GPU phases for bottlenecks
+    if SD_cores_gpu_init > total_gpu_cores
+        is_gpu_hw_limited = true; 
+        needed_gpu_cores = max(needed_gpu_cores, SD_cores_gpu_init - total_gpu_cores);
+    elseif SD_cores_gpu_init > 0 && total_gpu_cores > 0
+        is_gpu_sw_limited = true; 
+    end
+    if SD_cores_gpu_main > total_gpu_cores
+        is_gpu_hw_limited = true; 
+        needed_gpu_cores = max(needed_gpu_cores, SD_cores_gpu_main - total_gpu_cores);
+    elseif SD_cores_gpu_main > 0 && total_gpu_cores > 0
+        is_gpu_sw_limited = true; 
+    end
+    if SD_cores_gpu_result > total_gpu_cores
+        is_gpu_hw_limited = true; 
+        needed_gpu_cores = max(needed_gpu_cores, SD_cores_gpu_result - total_gpu_cores);
+    elseif SD_cores_gpu_result > 0 && total_gpu_cores > 0
+        is_gpu_sw_limited = true; 
+    end
+
+    % --- Calculate needed CPUs/GPUs ---
+    needed_cpus = 0;
+    if is_cpu_hw_limited && single_cpu_cores > 0
+        needed_cpus = ceil(needed_cpu_cores / single_cpu_cores);
+    end
+    needed_gpus = 0;
+    if is_gpu_hw_limited && single_gpu_cores > 0
+        needed_gpus = ceil(needed_gpu_cores / single_gpu_cores);
+    end
+    
+    % Final Bottleneck Summary (Detailed HW with Needed CPUs/GPUs)
+    final_status = ''; % Initialize as char array
+    if is_cpu_hw_limited && is_gpu_hw_limited
+        % Use double for sprintf %f, then cast to int for %d
+        final_status = sprintf('%d CPU(s) & %d GPU(s) needed - HW Limited', int32(needed_cpus), int32(needed_gpus));
+    elseif is_cpu_hw_limited
+        final_status = sprintf('%d more CPU(s) needed - HW Limited', int32(needed_cpus));
+    elseif is_gpu_hw_limited
+        final_status = sprintf('%d more GPU(s) needed - HW Limited', int32(needed_gpus));
+    else
+        % Check for SW limits only if not HW limited
+        if is_cpu_sw_limited && is_gpu_sw_limited
+            final_status = 'CPU & GPU SOFTWARE Limited';
+        elseif is_cpu_sw_limited
+            final_status = 'CPU SOFTWARE Limited';
+        elseif is_gpu_sw_limited
+            final_status = 'GPU SOFTWARE Limited';
+        else
+            final_status = 'Idle/Balanced'; % No significant bottlenecks
+        end
+    end
+
+    % --- F. Assign the final status_text here ---
+    % Explicitly convert the char array from sprintf to a string using string().
+    status_text = string(final_status);
+end
+

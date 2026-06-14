@@ -1,0 +1,11 @@
+Parameter,Value
+Init_core,12
+Init_uti,0.1
+Init_inst,50000
+Comp_core,250000
+Comp_uti,0.85
+Comp_inst,7.5e+15
+Result_core,5
+Result_uti,0.1
+Result_inst,10000
+Main_inst_scale,3.7

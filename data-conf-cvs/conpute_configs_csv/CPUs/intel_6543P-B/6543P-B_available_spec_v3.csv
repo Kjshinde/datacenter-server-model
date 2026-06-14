@@ -1,0 +1,8 @@
+Parameter,Value
+Tj_max,100
+TDP,160
+HD_cores,32
+Max_freq,2e9
+V_spec,1.5
+TEMP_case,85
+

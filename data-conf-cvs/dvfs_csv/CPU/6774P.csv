@@ -1,0 +1,10 @@
+Parameter,Value
+F1,1.4e9
+F2,1.8e9
+F3,2.3e9
+F4,2.5e9
+V1,0.90
+V2,1.10
+V3,1.30
+V4,1.50
+loaded_device_name,hello
